@@ -1,0 +1,109 @@
+apiVersion: gitopsapp/v1.alpha1
+kind: gitopsapp
+metadata:
+  name: sockshop
+  labels:
+    app: sockshop
+    team: sockshop-dev
+    foo: bar
+spec:
+  labels: # applied to all the automations and generated objects
+    app: sockshop
+    team: sockshop-dev
+    foo: bar
+  links:
+    # all of these links are optional, but give us valuable info for the UI
+    # akk if these are app-wide.
+    # If there is no centralized app metrics/dashboard these can be
+    # provided at the individual component level
+    user_defined_app_dashboard: https://mydashboard.example.org/appname
+    realtime_app_observability: https://myobservability.example.org/appname
+
+  app_sources: # defines all of the sources used across the app
+    - podinfodev
+      kind: GitRepository
+      name: podinfodev
+    - mybucket
+      kind: Bucket
+      name: podinfoprod
+
+  gates:
+  - name: wait-to-deploy
+    age: 30m
+  - name: staging-metrics
+    prometheus-alerts:
+    - errors-alert
+    - health-alert
+    - latency-alert
+  - name: office-hours
+    scheduled-time:
+      start: 05:00UTC
+      end: 21:00UTC
+  - name: global-blocks
+    blocklist:
+    - all-deploys
+    - our-app
+  - name: endpoint-check
+    url: https://podin.example.com/health
+  - name: image-security
+    security:
+      url: https://example.com/security
+      cves:
+        high: 1
+
+  stages:
+    - dev:
+      reconcilers:
+        # deploys just the backend of podinfo
+        - podinfodev-backend:
+          kind: AppKustomization
+          name: podinfodev-backend
+          gates:
+            -  do-something-in-a-container #linting, policy check
+            -  image-security
+        # deploys just the frontend of podinfo
+        - podinfodev-frontend:
+          kind: AppKustomization
+          Name: podinfodev-backend
+          gates:
+            -  do-something-in-a-container #linting, policy check
+            -  image-security
+        -test:
+        # Once dev is happy, changes are merged into /test a new helm relase is
+        # is generated and uploaded to the test helm repo, and tests are run there.
+        - podinfohelm-test
+          kind: AppHelmRelease
+          name: poninfo-helm-test
+          gates:
+            - do-something-in-a-container #linting, policy check
+            - image-security
+            - global-blocks
+    - test:
+      reconcilers:
+        - podinfohelm-test
+          kind: AppHelmRelease
+          name: poninfo-helm-test
+
+
+  app_deployers:
+    # deploys just the backend of podinfo
+    - podinfodev-backend:
+      kind: AppKustomization
+      name: podinfodev-backend
+    # deploys just the frontend of podinfo
+    - podinfodev-frontend:
+      kind: AppKustomization
+      Name: podinfodev-backend
+    # Once dev is happy, changes are merged into /test a new helm relase is
+    # is generated and uploaded to the test helm repo, and tests are run there.
+    - podinfohelm-test
+      kind: AppHelmRelease
+      name: poninfo-helm-test
+    # after the dev and test are completed in the test environment, changes are
+    # merged into main. Github actions are used to generate a new relase in the
+    # production mybucket because prod does not have access to github or the
+    # helm repository.  The helm repository is also updated, for those using
+    # podinfo externally.
+    - podinfoprod:
+      kind: AppHemRelease
+      name: podinfoprod
